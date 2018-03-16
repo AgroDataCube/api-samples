@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <title>Hello, AgroDataCube!</title>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Leaflet and jQuery -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.1/dist/leaflet.css" crossorigin="anonymous"/>
+    <script src="https://unpkg.com/leaflet@1.3.1/dist/leaflet.js" crossorigin="anonymous"></script>
+    <script src="https://code.jquery.com/jquery-3.2.1.js" crossorigin="anonymous"></script>
+
+    <link rel="stylesheet" href="css/main.css" />
+</head>
+<body>
+
+<div id="map" style="width: 800px; height: 600px;"></div>
+
+<script>
+    var map = L.map('map').setView([51.9775, 5.61616], 10);
+
+    L.tileLayer(
+        'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+          }).addTo(map);
+
+    $.ajax({
+        type: 'GET',
+        url: 'https://agrodatacube.wur.nl/api/v1/rest/fields?output_epsg=4326&page_size=50&page_offset=0&year=2017&geometry=POLYGON((164685%20451073,%20184119%20451073,%20184119%20433332,%20164685%20433332,%20164685%20451073))&epsg=28992',
+        dataType: 'json',
+        success: function (response) {
+            var geojsonLayer = L.geoJson(response).addTo(map);
+            map.fitBounds(geojsonLayer.getBounds());
+        },
+    });
+</script>
+
+</body>
+</html>
