@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <title>Hello, AgroDataCube!</title>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Leaflet and jQuery -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.1/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.3.1/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://code.jquery.com/jquery-3.2.1.js" crossorigin="anonymous"></script>
+<style>
+.label {
+	white-space: normal;
+	width: 150px;
+}
+.filecontrol {
+    padding: 0px 0px;
+    background: rgba(255,255,255,1);
+    box-shadow: 0 0 5px rgba(0,0,0,0.2);
+    border-radius: 0px;
+	width: 88px;
+}
+.fileContainer [type=file] {
+    cursor: inherit;
+    display: block;
+    font-size: 999px;
+    filter: alpha(opacity=0);
+    min-height: 100%;
+    min-width: 100%;
+    opacity: 0;
+    position: absolute;
+    right: 0;
+    top: 0;
+}
+.fileContainer {
+    width: 95%;
+	width: calc(100% - 8px);
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    border-radius: 2px;
+    padding: 1px;
+    background-color: white;
+	border: 1px solid rgba(0,74,109,1);
+    color: rgba(0,74,109,1);
+    overflow: hidden;
+    position: relative;
+    margin: 4px 2px 0px 2px;
+}
+.fileContainer:hover {
+    font-weight: bold;
+    cursor: pointer;  
+}
+	</style>
+</head>
+<body style="height: 100%; padding: 0; margin: 0; overflow: hidden;">
+	<div style="position:relative; width: 100%; height: 5%; height: calc(50px); padding: 5px;">
+		<img src="https://agrodatacube.wur.nl/images/logo_color_rgb.jpg" width="40" alt="AgroDataCube" style="position:relative; float:left;"/>
+		<div class="search-container" style="position:relative; float:left;margin-left:10px;margin-top:2px;">
+			<form id="searchForm">
+				<input type="search" id="search" placeholder="Locatie zoeken..." />
+			</form>
+		</div>
+	</div>
+	
+	<div style="position:absolute; top:5%; height: 95%; height: calc(100%-50px); width: 100%;">
+	<div id="map2" style="position:relative; width: 34%; height: 50%;float:right;"></div>
+	<div id="map4" style="position:relative; width: 33%; height: 50%;float:right;"></div>
+	<div id="map3" style="position:relative; width: 33%; height: 50%;float:right;"></div>
+	<div style="position:relative; width: 34%; height: 50%;float:right;">
+		<div id="map1" style="position:relative; width: 100%; height: 100%;border:inset;"></div>
+	</div>
+	<div id="map6" style="position:relative; width: 33%; height: 50%;float:right;"></div>
+	<div id="map5" style="position:relative; width: 33%; height: 50%;float:right"></div>
+</div>
+
+<script>
+	var fieldid, meteostationid, activeFeature, map= {}, activeBounds, bbox, offset = 0, busy = false, filecontrol;
+	var fieldsLayer, fieldLayer, fieldAHNLayer, fieldNDVILayer, fieldMeteoLayer, fieldSoiltypesLayer, fieldSoilparamsLayer,
+		AHNLayer, meteoLayer, soiltypesLayer, soilparamsLayer;
+	var baseUrl = 'https://agrodatacube.wur.nl/api/v1/rest';
+	var startView = [52.38766,6.257711], startZoom = 15;
+	function mousePropagationKiller(div, map){
+		if (!L.Browser.touch) {
+			L.DomEvent.disableClickPropagation(div);
+			L.DomEvent.disableScrollPropagation(div);
+			L.DomEvent.on(div, 'mousewheel', L.DomEvent.stopPropagation);
+		} else {
+			L.DomEvent.on(div, 'click dblclick', function (ev) {
+				if (ev.type == 'div') {
+					L.DomEvent.stopPropagation(ev);
+					L.DomEvent.stop(ev);
+				}
+			});
+			div.addEventListener('mouseover', function () {
+				map.dragging.disable();
+				map.doubleClickZoom.disable()
+			});
+			div.addEventListener('mouseout', function () {
+				map.dragging.enable();
+				map.doubleClickZoom.enable()
+			});
+		} 
+	};
+	function selectFeature(e) {
+		var aLayer = e.target;
+		var options = aLayer.options || aLayer._options;
+		if (options.title == 'fields') {
+			activeFeature = aLayer.feature;
+			fieldid = activeFeature.properties['fieldid'];
+
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'?output_epsg=4326&page_size=50&page_offset=0',
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response) {
+					if (fieldLayer) {
+						fieldLayer.clearLayers();
+						controlLayers['fields'].removeLayer(fieldLayer);
+					}
+					fieldLayer = L.geoJson(response, {title: 'fields', 
+						style: {color: 'blue'},
+						onEachFeature: onEachFeature}).addTo(map['fields']);
+					controlLayers['fields'].addOverlay(fieldLayer, 'Field ' + fieldid);
+					var bounds = fieldLayer.getBounds();
+					map['files'].fitBounds(bounds, {padding: [0.1,0.1]});
+					map['ahn'].fitBounds(bounds, {padding: [0.1,0.1]});
+					map['ndvi'].fitBounds(bounds, {padding: [0.1,0.1]});
+					map['soil'].fitBounds(bounds, {padding: [0.1,0.1]});
+					map['meteo'].fitBounds(bounds, {padding: [0.1,0.1]});
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/ahn?output_epsg=4326&page_size=50&page_offset=0',
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response) {
+					if (fieldAHNLayer) {
+						fieldAHNLayer.clearLayers();
+					}
+					var doLayer = false, ahn = [];
+					for (var f in response.features) {
+						//console.log(response.features[f].properties);
+						if (response.features[f].geometry != null)
+							doLayer = true;
+						else if (activeFeature) {
+							response.features[f].geometry = activeFeature.geometry;
+							doLayer = true;
+						}
+						else
+							ahn.push(response.features[f].properties);
+					}
+					if (doLayer) {
+						fieldAHNLayer = L.geoJson(response, {title: 'ahn', 
+							style: {color: 'red'},
+							onEachFeature: onEachFeature}).addTo(map['ahn']);
+					}
+					else
+						activeFeature.properties['ahn'] = ahn;
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/ndvi?output_epsg=4326&page_size=50&page_offset=0',
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response) {
+					if (fieldNDVILayer) {
+						for (var f in fieldNDVILayer) {
+							fieldNDVILayer[f].clearLayers();
+							controlLayers['ndvi'].removeLayer(fieldNDVILayer[f]);
+						}
+					}
+					fieldNDVILayer = [];
+					var doLayer = false, ndvi = [];
+					for (var f in response.features) {
+						//console.log(response.features[f].properties);
+						if (response.features[f].geometry != null)
+							doLayer = true;
+						else if (activeFeature) {
+							response.features[f].geometry = activeFeature.geometry;
+							doLayer = true;
+						}
+						else
+							ndvi.push(response.features[f].properties);
+
+						if (doLayer) {
+							fieldNDVILayer.push(L.geoJson(response.features[f], {title: 'ndvi', 
+								style: {color: 'red'},
+								onEachFeature: onEachFeature}));
+							fieldNDVILayer[fieldNDVILayer.length-1].addTo(map['ndvi']);
+							controlLayers['ndvi'].addOverlay(fieldNDVILayer[fieldNDVILayer.length-1], 'NDVI ' + response.features[f].properties.datum);
+						}
+					}
+
+					if (!doLayer)
+						activeFeature.properties['ndvi'] = ndvi;
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/meteostations?output_epsg=4326&page_size=50&page_offset=0',
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response) {
+					if (fieldMeteoLayer) {
+						for (var f in fieldMeteoLayer) {
+							fieldMeteoLayer[f].clearLayers();
+							controlLayers['meteo'].removeLayer(fieldMeteoLayer[f]);
+						}
+					}
+					fieldMeteoLayer = [];
+					var doLayer = false, meteo = [];
+					for (var f in response.features) {
+						if (response.features[f].geometry != null)
+							doLayer = true;
+						else if (activeFeature) {
+							response.features[f].geometry = activeFeature.geometry;
+							doLayer = true;
+						}
+						else
+							meteo.push(response.features[f].properties);
+
+						if (doLayer) {
+							fieldMeteoLayer.push(L.geoJson(response.features[f], {title: 'meteo', 
+								style: {color: 'yellow'},
+								onEachFeature: onEachFeature}));
+							fieldMeteoLayer[fieldMeteoLayer.length-1].addTo(map['meteo']);
+							controlLayers['meteo'].addOverlay(fieldMeteoLayer[fieldMeteoLayer.length-1], 'Meteo ' + response.features[f].properties.meteostationid);
+						}
+					}
+
+					if (!doLayer)
+						activeFeature.properties['ndvi'] = ndvi;
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/soilparams?output_epsg=4326&page_size=50&page_offset=0',
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response) {
+					if (fieldSoilparamsLayer) {
+						fieldSoilparamsLayer.clearLayers();
+						controlLayers['soil'].removeLayer(fieldSoilparamsLayer);
+					}
+					fieldSoilparamsLayer = L.geoJson(response, {title: 'soil', 
+						style: {color: 'purple'},
+						onEachFeature: onEachFeature}).addTo(map['soil']);
+					controlLayers['soil'].addOverlay(fieldSoilparamsLayer, 'Soilparams');
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/soiltypes?output_epsg=4326&page_size=50&page_offset=0',
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response) {
+					if (fieldSoiltypesLayer) {
+						fieldSoiltypesLayer.clearLayers();
+						controlLayers['soil'].removeLayer(fieldSoiltypesLayer);
+					}
+					fieldSoiltypesLayer = L.geoJson(response, {title: 'soil', 
+						style: {color: 'brown'},
+						onEachFeature: onEachFeature}).addTo(map['soil']);
+					controlLayers['soil'].addOverlay(fieldSoiltypesLayer, 'Soiltypes');
+				}
+			});
+		}
+		else if (options.title == 'meteo') {
+			meteostationid = aLayer.feature.properties['meteostationid']
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/meteodata?meteostation='+meteostationid+'&output_epsg=4326&fromdate=20170101&todate=20180101',
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response) {
+					if (meteoLayer) {
+						meteoLayer.clearLayers();
+						controlLayers['meteo'].removeLayer(meteoLayer);
+					}
+					meteoLayer = L.geoJson(response, {title: 'meteo', 
+						style: {color: 'orange'},
+						onEachFeature: onEachFeature}).addTo(map['meteo']);
+					controlLayers['meteo'].addOverlay(meteoLayer, 'Meteo ' + meteostationid);
+				}
+			});
+		}
+	};
+	function zoomToFeature(e) {
+		var bounds = e.target.getBounds();
+		map['files'].fitBounds(bounds, {padding: [0.1,0.1]});
+		map['ahn'].fitBounds(bounds, {padding: [0.1,0.1]});
+		map['ndvi'].fitBounds(bounds, {padding: [0.1,0.1]});
+		map['soil'].fitBounds(bounds, {padding: [0.1,0.1]});
+		map['meteo'].fitBounds(bounds, {padding: [0.1,0.1]});
+	};
+	function onEachFeature(aFeature, aLayer) {
+		var options = aLayer.options || aLayer._options;
+		
+		aLayer.on({
+			click: 	  selectFeature
+		});
+		var props = "<b>"+options.title +"</b><br>";
+		for (d in aFeature.properties) {
+			props += '<br>' + d + ': ' + aFeature.properties[d];
+		}
+		aFeature.properties.type= options.title;
+		aLayer.bindTooltip(props, { direction:'center', className: 'label' });
+	};
+	function nextFieldsPage() {
+		offset+=50;
+		var url = baseUrl + '/fields?output_epsg=4326&page_size=50&page_offset='+offset+'&year=2017&geometry=POLYGON(('+bbox[0] +"%20"+ bbox[1] +','+ bbox[0] +"%20"+ bbox[3] +','+ bbox[2] +"%20"+ bbox[3] +','+ bbox[2] +"%20"+ bbox[1] +','+ bbox[0] +"%20"+ bbox[1]+'))&epsg=4326';
+		$.ajax({
+			type: "GET",
+			url: url,
+			dataType: 'json',
+			crossDomain: true,
+			success: function (response, textStatus) {
+				if (fieldsLayer)
+					fieldsLayer.addData(response);
+				if (fieldLayer) 
+					fieldLayer.bringToFront();
+				if (response.features.length < 50)
+					busy = false;
+				else
+					nextFieldsPage();
+			},
+			error: function(xhr, textStatus, errorThrown){
+				alert(textStatus +' ('+ errorThrown +'): '+ xhr.responseText || "");
+			}
+		});
+	};
+	function onMoveEnd(e) {
+		var bounds = e.target.getBounds();
+		bbox = bounds.toBBoxString().split(',');
+		
+		if (!busy && (!activeBounds || activeBounds != bounds)) {
+			busy = true;
+			offset = 0;
+			var url = baseUrl + '/fields?output_epsg=4326&page_size=50&page_offset='+ offset +'&year=2017&geometry=POLYGON(('+bbox[0] +"%20"+ bbox[1] +','+ bbox[0] +"%20"+ bbox[3] +','+ bbox[2] +"%20"+ bbox[3] +','+ bbox[2] +"%20"+ bbox[1] +','+ bbox[0] +"%20"+ bbox[1]+'))&epsg=4326';
+			$.ajax({
+				type: "GET",
+				url: url,
+				dataType: 'json',
+				crossDomain: true,
+				success: function (response, textStatus) {
+					if (fieldsLayer) {
+						fieldsLayer.clearLayers();
+						controlLayers['fields'].removeLayer(fieldsLayer);
+					}
+					fieldsLayer = L.geoJson(response, {title: 'fields', 
+						style: {color: 'green'},
+						onEachFeature: onEachFeature}).addTo(map['fields']);
+					controlLayers['fields'].addOverlay(fieldsLayer, 'Fields');
+					if (fieldLayer) 
+						fieldLayer.bringToFront();
+					if (response.features.length < 50)
+						busy = false;
+					else {
+						nextFieldsPage();
+					}
+				},
+				error: function(xhr, textStatus, errorThrown){
+					alert(textStatus +' ('+ errorThrown +'): '+ xhr.responseText || "");
+				}
+			});
+			activeBounds = bounds;
+		}
+	};
+	function geocodeSearch(searchStr) {
+		var center = map['fields'].getCenter();
+		var url = 'http://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates' +
+		  '?SingleLine=' + searchStr +
+		  '&f=json' +
+		  '&location=' + center +
+		  '&distance=2' +
+		  '&outSR=4326' +
+		  '&maxLocations=1';
+		  
+		var xhttp;
+		if (window.XMLHttpRequest) {
+			xhttp = new XMLHttpRequest();
+		} 
+    else {
+			// code for IE6, IE5
+			xhttp = new ActiveXObject("Microsoft.XMLHTTP");
+		}
+		
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4 && this.status == 200) {
+				var response = JSON.parse(this.responseText);
+				var searchExt = response.candidates[0].extent;
+				var bounds =[[searchExt.ymin, searchExt.xmin], [searchExt.ymax, searchExt.xmax]];
+				map['fields'].fitBounds(bounds, {padding: [0,0]}).setZoom(startZoom-1);
+			}
+		};
+		xhttp.open("GET",url,true);
+		xhttp.send();
+	};
+	if (document.querySelector('#searchForm'))
+		document.querySelector('#searchForm').addEventListener('submit', function(e) {
+			  geocodeSearch(e.target.children.namedItem('search').value);
+			  e.preventDefault();
+			  return false; // prevent page reload
+		});
+	
+  map['fields']= L.map('map1').setView(startView, startZoom);
+	map['files'] = L.map('map2',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	map['soil']  = L.map('map3',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	map['ahn']   = L.map('map4',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	map['ndvi']  = L.map('map5',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	map['meteo'] = L.map('map6',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	var baseLayers = {
+		"Open Street Map": L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
+			attribution: '&copy; <a href="http://osm.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+		}),
+		"Google Hybrid Map": L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
+			maxZoom: 20,
+			attribution:'Imagery &copy; DigitalGlobe, Map data &copy; <a href="https://www.google.com/intl/en/help/terms_maps.html" target="_blank">Google</a>',
+			subdomains:['mt0','mt1','mt2','mt3']
+		})
+	};
+    map['fields'].addLayer(baseLayers["Open Street Map"]);
+	  map['fields'].on('moveend', onMoveEnd);
+    map['files'].addLayer(L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+    map['soil'].addLayer( L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+    map['ahn'].addLayer(  L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+    map['ndvi'].addLayer( L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+    map['meteo'].addLayer(L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+
+	// filecontrol left
+	filecontrol = L.control({position: 'topleft'});
+	filecontrol.handleReaderAbort = function(e) {
+		alert('File read cancelled');
+	};
+	filecontrol.handleReaderLoadend = function(ev) {
+		// check ready
+		if (ev.target.readyState == FileReader.DONE) { // DONE == 2
+			console.log(ev.target.filename);
+			if (ev.target.result) {
+				var parts = ev.target.filename.split('.');
+				var extensie= parts[parts.length - 1].toLowerCase();
+				if (extensie == 'json') {
+					var geojsonLayer = L.geoJson(JSON.parse(ev.target.result), {
+						title: 'files', 
+						style: {color: 'green'},
+						pointToLayer: function(geoJsonPoint, latlng) { 
+							return L.circleMarker(latlng, {title: 'files', weight:1, radius: 2}); 
+						},
+						onEachFeature: onEachFeature}
+					).addTo(map['files']);
+					controlLayers['files'].addOverlay(geojsonLayer, parts[parts.length - 2]);
+				}
+			}
+			else {
+				alert('empty file');
+			}
+		}
+	};
+	filecontrol.handleFileSelect = function(evt) {
+		if (evt.target.files.length > 0) {
+			console.log(evt.target.files.length, evt.target.files[0].name, evt.target.files[evt.target.files.length-1].name);
+			//checks
+			for (var f=evt.target.files.length-1; f > -1; f--) {
+				var file = evt.target.files[f];
+				if (file.size == 0) {
+					alert('empty file: ' + file.name);
+					return;
+				}
+				var fileparts= file.name.split('.');
+				var extensie = fileparts[fileparts.length - 1].toLowerCase();
+				if (extensie != 'json') {
+					alert('wrong file type: ' + extensie);
+					return;
+				}
+			}
+			
+			reader = [];
+			for (var f=evt.target.files.length-1; f > -1; f--) {
+				reader.push(new FileReader());
+			}
+			for (var f=evt.target.files.length-1; f > -1; f--) {
+				reader[f].onabort = filecontrol.handleReaderAbort;
+				reader[f].onloadend = filecontrol.handleReaderLoadend;
+				reader[f]['filename'] = evt.target.files[f].name;
+				var file = evt.target.files[f];
+				var fileparts= file.name.split('.');
+				var extensie = fileparts[fileparts.length - 1].toLowerCase();
+				if (extensie == 'json')
+					reader[f].readAsText(file);
+			}
+			evt.target.value = '';
+		}
+		
+		return;
+	};
+	filecontrol.onAdd = function (map) {
+		this._div  = L.DomUtil.create('div', 'filecontrol'); 
+		mousePropagationKiller(this._div, map);
+		this._lbl  = L.DomUtil.create('label', 'fileContainer', this._div);
+		this._lbl.textContent= '+ file geojson';
+		this._files= L.DomUtil.create('input', 'files', this._lbl);
+		this._files.setAttribute("type", 'file');
+		this._files.setAttribute("accept", '.json');
+		return this._div;
+	};
+	filecontrol.addTo(map['files']);
+	filecontrol._files.addEventListener('change', filecontrol.handleFileSelect);
+
+    var controlLayers = {};
+	controlLayers['fields'] = L.control.layers(baseLayers).addTo(map['fields']);
+	controlLayers['fields'].setPosition('topleft');		
+	controlLayers['files'] = L.control.layers([]).addTo(map['files']);
+	controlLayers['files'].setPosition('topleft');		
+	controlLayers['soil'] = L.control.layers([]).addTo(map['soil']);
+	controlLayers['soil'].setPosition('topleft');		
+	controlLayers['ndvi'] = L.control.layers([]).addTo(map['ndvi']);
+	controlLayers['ndvi'].setPosition('topleft');		
+	controlLayers['meteo'] = L.control.layers([]).addTo(map['meteo']);
+	controlLayers['meteo'].setPosition('topleft');		
+
+	onMoveEnd({target: map['fields']});
+</script>
+</body>
+</html>
