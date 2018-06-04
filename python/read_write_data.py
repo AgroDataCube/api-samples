@@ -60,7 +60,7 @@ def read_write(input_path,output_path):
                     ahn_max = max_/len(ahn_values['features'])
 
                     url_crop = "http://agrodatacube.wur.nl/api/v1/rest/fields/{}?output_epsg=28992&page_offset=0".format(fieldid)
-                    response_crop = requests.get(url_crop)
+                    response_crop = requests.get(url_crop, headers={"token":"<your token>"})
                     crop_values = geojson.loads(response_crop.content)
 
                     crop_name = crop_values['features'][0]['properties']['crop_name']
@@ -72,7 +72,7 @@ def read_write(input_path,output_path):
                     geometry_wkt = geom_shapely.wkt
 
                     url_meteo = "http://agrodatacube.wur.nl/api/v1/rest/fields/{}/meteostations?output_epsg=28992&page_offset=0".format(fieldid)
-                    response_meteo = requests.get(url_meteo)
+                    response_meteo = requests.get(url_meteo,headers={"token":"<your token>"})
                     meteo_values = geojson.loads(response_meteo.content)
                     station1_id = meteo_values['features'][0]['properties']['meteostationid']
                     dist_station1 = meteo_values['features'][0]['properties']['distance']
@@ -86,7 +86,7 @@ def read_write(input_path,output_path):
                     dist_station5 = meteo_values['features'][4]['properties']['distance']
 
                     url_ndvi = "http://agrodatacube.wur.nl/api/v1/rest/fields/{}/ndvi?output_epsg=28992&page_offset=0".format(fieldid)
-                    response_ndvi = requests.get(url_ndvi)
+                    response_ndvi = requests.get(url_ndvi,headers={"token":"<your token>"})
                     ndvi_values = geojson.loads(response_ndvi.content)
                     for i in range(len(ndvi_values['features'])):
                         ndvi_val = ndvi_values['features'][i]['properties']['ndvi_value']
@@ -101,7 +101,7 @@ def read_write(input_path,output_path):
 ###The API only returns 50 max, so I have do nit in QGIS.
 def zip_codes():
     url_zipcodes = 'http://agrodatacube.wur.nl/api/v1/rest/regions/postalcodes?&output_epsg=28992&page_offset=0'
-    response_zipcodes = requests.get(url_zipcodes)
+    response_zipcodes = requests.get(url_zipcodes,headers={"token":"<your token>"})
     zip_codes_api = geojson.loads(response_zipcodes.content)
     zip_codes = []
     for i in range(len(zip_codes_api['features'])):
