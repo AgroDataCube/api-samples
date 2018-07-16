@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <title>Hello, AgroDataCube!</title>
+	<link rel="shortcut icon" href="https://agrodatacube.wur.nl/images/logo_color_rgb.jpg"/>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Leaflet, jQuery, d3v3 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.1/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.3.1/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://code.jquery.com/jquery-3.2.1.js" crossorigin="anonymous"></script>
+	<script src="./d3.v3.min.js"></script>
+<style>
+.label {
+	white-space: normal;
+	width: 150px;
+}
+.filecontrol {
+    padding: 0px 0px;
+    background: rgba(255,255,255,1);
+    box-shadow: 0 0 5px rgba(0,0,0,0.2);
+    border-radius: 0px;
+	width: 88px;
+}
+.fileContainer [type=file] {
+    cursor: inherit;
+    display: block;
+    font-size: 999px;
+    filter: alpha(opacity=0);
+    min-height: 100%;
+    min-width: 100%;
+    opacity: 0;
+    position: absolute;
+    right: 0;
+    top: 0;
+}
+.fileContainer {
+    width: 95%;
+	width: calc(100% - 8px);
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    border-radius: 2px;
+    padding: 1px;
+    background-color: white;
+	border: 1px solid rgba(0,74,109,1);
+    color: rgba(0,74,109,1);
+    overflow: hidden;
+    position: relative;
+    margin: 4px 2px 0px 2px;
+}
+.fileContainer:hover {
+    font-weight: bold;
+    cursor: pointer;  
+}
+/* svg rendering: */
+path.line { 
+    stroke-width: 1;
+    fill: none;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+circle { 
+  stroke-width: 1;
+}
+.axis path,
+.axis line {
+  fill: none;
+  stroke: grey;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+.legend, .label, .hover-text, .tick text {
+    font-size: x-small;
+    background-color: white;
+	stroke-width: 0.2;
+}
+.heading {
+    font-size: small;
+}
+	</style>
+</head>
+<body style="height: 100%; padding: 0; margin: 0; overflow: hidden;">
+	<div style="position:relative; width: 100%; height: 5%; height: calc(50px); padding: 5px;">
+		<img src="https://agrodatacube.wur.nl/images/logo_color_rgb.jpg" width="40" alt="AgroDataCube" style="position:relative; float:left;"/>
+		<div class="search-container" style="position:relative; float:left;margin-left:10px;margin-top:2px;">
+			<form id="searchForm">
+				<input type="search" id="search" placeholder="Locatie zoeken..." />
+			</form>
+		</div>
+	</div>
+	
+	<div style="position:absolute; top:5%; height: 95%; height: calc(100%-50px); width: 100%;">
+		<div style="position:relative; width: 33%; height: 100%;float:right;">
+			<div style="position:relative; width: 100%; height: 80%;float:right;">
+				<div id="chart2" style="position:relative; width: 100%; height: 100%;padding:0px 10px;"></div>
+			</div>
+			<div style="position:relative; width: 100%; height: 20%;float:right;">
+				<div id="chart1" style="position:relative; width: 100%; height: 100%;padding:0px 10px;"></div>
+			</div>
+		</div>
+		
+		<div style="position:relative; width: 67%; height: 100%;float:right;">
+			<div id="map2" style="position:relative; width: 50%; height: 50%;float:right"></div>
+			<div style="position:relative; width: 50%; height: 50%;float:right;">
+				<div id="map1" style="position:relative; width: 100%; height: 100%;border:inset;"></div>
+			</div>
+			<div id="map3" style="position:relative; width: 50%; height: 50%;float:right;"></div>
+			<div id="map4" style="position:relative; width: 50%; height: 50%;float:right;"></div>
+		</div>
+	</div>
+
+<script>
+	var fieldid, meteostationid, soiltypeid, activeFeature, map= {}, activeBounds, bbox, offset = 0, busy = false, filecontrol;
+	var fieldsLayer, fieldLayer, fieldAHNLayer, fieldNDVILayer, fieldMeteoLayer, fieldSoiltypesLayer, fieldSoilparamsLayer,
+		AHNLayer, meteoLayer, soiltypeLayer, soilparamsLayer;
+	var baseUrl = 'https://agrodatacube.wur.nl/api/v1/rest';
+	var MIJN_TOKEN = 'TOKEN';
+	var startView = [51.99,5.665], startZoom = 16;	//De Marke: 52.0391699,6.3480605
+	function mousePropagationKiller(div, map){
+		if (!L.Browser.touch) {
+			L.DomEvent.disableClickPropagation(div);
+			L.DomEvent.disableScrollPropagation(div);
+			L.DomEvent.on(div, 'mousewheel', L.DomEvent.stopPropagation);
+		} else {
+			L.DomEvent.on(div, 'click dblclick', function (ev) {
+				if (ev.type == 'div') {
+					L.DomEvent.stopPropagation(ev);
+					L.DomEvent.stop(ev);
+				}
+			});
+			div.addEventListener('mouseover', function () {
+				map.dragging.disable();
+				map.doubleClickZoom.disable()
+			});
+			div.addEventListener('mouseout', function () {
+				map.dragging.enable();
+				map.doubleClickZoom.enable()
+			});
+		} 
+	};
+	function doMeteoSeries(response) {
+		if (meteoLayer) {
+			meteoLayer.clearLayers();
+			controlLayers['meteo'].removeLayer(meteoLayer);
+		}
+		if (activeFeature && response.features.length > 0){	// && meteo.length > 0) {
+			//response = {"type": "Feature", "geometry": activeFeature.geometry, "properties": {"id": meteostationid, "chart": meteo}}
+			response.features[0].properties = {"id": meteostationid, "chart": response.features[0].properties};
+			meteoLayer = L.geoJson(response.features[0], {title: 'meteo', 
+				style: {color: 'orange'},
+				onEachFeature: onEachFeature}).addTo(map['meteo']);
+			controlLayers['meteo'].addOverlay(meteoLayer, 'Meteo#' + meteostationid + ' data');
+		}
+	};
+	function selectFeature(e) {
+		var aLayer = e.target;
+		var options = aLayer.options || aLayer._options;
+		if (options.title == 'fields') {
+			activeFeature = aLayer.feature;
+			fieldid = activeFeature.properties['fieldid'];
+
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'?output_epsg=4326&page_size=50&page_offset=0',
+				headers: {"token": MIJN_TOKEN },
+				error: function(xhr, textStatus){
+					alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+				},
+				success: function (response) {
+					if (fieldLayer) {
+						fieldLayer.clearLayers();
+						controlLayers['fields'].removeLayer(fieldLayer);
+					}
+					fieldLayer = L.geoJson(response, {title: 'fields', style: {color: 'blue'}, onEachFeature: onEachFeature}).addTo(map['fields']);
+					controlLayers['fields'].addOverlay(fieldLayer, 'Field ' + fieldid);
+					
+					var bounds = fieldLayer.getBounds();
+					map['ahn'].fitBounds(bounds, {padding: [0.1,0.1]});
+					map['soil'].fitBounds(bounds, {padding: [0.1,0.1]});
+					map['meteo'].fitBounds(bounds, {padding: [0.1,0.1]});
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/ahn?output_epsg=4326&page_size=50&page_offset=0',
+				headers: {"token": MIJN_TOKEN },
+				error: function(xhr, textStatus){
+					alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+				},
+				success: function (response) {
+					if (fieldAHNLayer) {
+						fieldAHNLayer.clearLayers();
+					}
+					var doLayer = false, ahn = [];
+					for (var f in response.features) {
+						if (response.features[f].geometry != null)
+							doLayer = true;
+						else if (activeFeature) {
+							response.features[f].geometry = activeFeature.geometry;
+							doLayer = true;
+						}
+						else
+							ahn.push(response.features[f].properties);
+					}
+					if (doLayer) {
+						fieldAHNLayer = L.geoJson(response, {title: 'ahn', 
+							style: {color: 'red'},
+							onEachFeature: onEachFeature}).addTo(map['ahn']);
+							
+							// @ToDo: do something with the statistics (max/mean/min/count)?
+					}
+					else
+						activeFeature.properties['ahn'] = ahn;
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/ndvi?output_epsg=4326&fromdate=20170101&todate=20180101&page_size=366&page_offset=0',
+				headers: {"token": MIJN_TOKEN },
+				error: function(xhr, textStatus){
+					alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+				},
+				success: function (response) {
+					if (fieldNDVILayer) {
+						fieldNDVILayer.clearLayers();
+						controlLayers['meteo'].removeLayer(fieldNDVILayer);
+					}
+					var ndvi = [];
+					for (var f in response.features) {
+						ndvi.push(response.features[f].properties);
+					}
+					if (activeFeature){	// && ndvi.length > 0) {
+						response = {"type": "Feature", "geometry": activeFeature.geometry, "properties": {"id": fieldid, "chart": ndvi}}
+						fieldNDVILayer = L.geoJson(response, {title: 'ndvi', 
+							style: {color: 'red'},
+							onEachFeature: onEachFeature});
+						fieldNDVILayer.addTo(map['meteo']);
+						controlLayers['meteo'].addOverlay(fieldNDVILayer, 'NDVI');
+						//activeFeature.properties['ndvi'] = ndvi;
+					}
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/meteostations?output_epsg=4326&page_size=3&page_offset=0',
+				headers: {"token": MIJN_TOKEN },
+				error: function(xhr, textStatus){
+					alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+				},
+				success: function (response) {
+					if (fieldMeteoLayer) {
+						//for (var f in fieldMeteoLayer) {
+							fieldMeteoLayer.clearLayers();
+							controlLayers['meteo'].removeLayer(fieldMeteoLayer);
+						//}
+					}
+					//fieldMeteoLayer = [];
+					var doLayer = false, meteo = [];
+					for (var f in response.features) {
+						if (response.features[f].geometry != null)
+							doLayer = true;
+						else if (activeFeature) {
+							response.features[f].geometry = activeFeature.geometry;
+							doLayer = true;
+						}
+						else
+							meteo.push(response.features[f].properties);
+					}
+					if (doLayer) {
+						fieldMeteoLayer = L.geoJson(response, {title: 'meteo', 
+							style: {color: 'yellow'},
+							onEachFeature: onEachFeature});
+						fieldMeteoLayer.addTo(map['meteo']);
+						controlLayers['meteo'].addOverlay(fieldMeteoLayer, 'Meteostations');
+						// get the meteo data
+						if (response.features[0].properties['meteostationid']) {
+							meteostationid = response.features[0].properties['meteostationid']
+							$.ajax({
+								type: "GET",
+								url: baseUrl + '/meteodata?meteostation='+meteostationid+'&output_epsg=4326&fromdate=20170101&todate=20180101&page_size=366&page_offset=0&output_format=series',
+								//url: baseUrl + '/meteodata/'+meteostationid+'?output_epsg=4326&fromdate=20170101&todate=20180101&page_size=366&page_offset=0',
+								//url: baseUrl + '/meteodata/'+meteostationid+'/2017?output_epsg=4326&page_size=366&page_offset=0',
+								headers: {"token": MIJN_TOKEN },
+								error: function(xhr, textStatus){
+									alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+								},
+								success: doMeteoSeries
+							});
+						}
+					}
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/soilparams?output_epsg=4326&page_size=50&page_offset=0',
+				headers: {"token": MIJN_TOKEN },
+				error: function(xhr, textStatus){
+					alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+				},
+				success: function (response) {
+					if (fieldSoilparamsLayer) {
+						fieldSoilparamsLayer.clearLayers();
+						controlLayers['soil'].removeLayer(fieldSoilparamsLayer);
+					}
+					fieldSoilparamsLayer = L.geoJson(response, {title: 'soil', 
+						style: {color: 'purple'},
+						onEachFeature: onEachFeature}).addTo(map['soil']);
+					controlLayers['soil'].addOverlay(fieldSoilparamsLayer, 'Soilparams');
+
+					// @ToDo: do something with the data (soilparamid)
+					
+				}
+			});
+			$.ajax({
+				type: "GET",
+				url: baseUrl + '/fields/'+fieldid+'/soiltypes?output_epsg=4326&page_size=50&page_offset=0',
+				headers: {"token": MIJN_TOKEN },
+				error: function(xhr, textStatus){
+					alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+				},
+				success: function (response) {
+					if (fieldSoiltypesLayer) {
+						fieldSoiltypesLayer.clearLayers();
+						controlLayers['soil'].removeLayer(fieldSoiltypesLayer);
+					}
+					fieldSoiltypesLayer = L.geoJson(response, {title: 'soil', 
+						style: {color: 'brown'},
+						onEachFeature: onEachFeature}).addTo(map['soil']);
+					controlLayers['soil'].addOverlay(fieldSoiltypesLayer, 'Soiltypes');
+
+					// @ToDo: do something with the data (soilcode)
+					// get the soil data: soilcode soilid
+					if (response.features[0].properties['soilid']) {
+						soiltypeid = response.features[0].properties['soilid']
+						$.ajax({ // check: soilcode = 'aVz/vWz/pZn21'
+							type: "GET",
+							url: baseUrl + '/soiltypes/'+soiltypeid+'?output_epsg=4326&page_size=1&page_offset=0',
+							//url: baseUrl + '/soilparams/'+encodeURIComponent('aVz/vWz/pZn21')+'?output_epsg=4326&page_size=1&page_offset=0',
+							//url: baseUrl + '/soiltypes/8327?output_epsg=4326&page_size=1&page_offset=0',
+							//url: baseUrl + '/codes/soilcodes/'+encodeURIComponent('aVz/vWz/pZn21')+'?output_epsg=4326&page_size=1&page_offset=0',
+							headers: {"token": MIJN_TOKEN },
+							error: function(xhr, textStatus){
+								if (xhr.status != 200)
+									alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+							},
+							success: function (response) {
+								if (soiltypeLayer) {
+									soiltypeLayer.clearLayers();
+									controlLayers['soil'].removeLayer(soiltypeLayer);
+								}
+								soiltypeLayer = L.geoJson(response, {title: 'soil', 
+									style: {color: 'blue'},
+									onEachFeature: onEachFeature}).addTo(map['soil']);
+								controlLayers['soil'].addOverlay(soiltypeLayer, 'Soil#' + soiltypeid + ' data');
+							}
+						});
+					}
+				}
+			});
+		}
+		else if (options.title == 'meteo') {
+			aLayer.bringToBack();
+			if (aLayer.feature.properties['meteostationid']) {
+				meteostationid = aLayer.feature.properties['meteostationid']
+				$.ajax({
+					type: "GET",
+					url: baseUrl + '/meteodata?meteostation='+meteostationid+'&output_epsg=4326&fromdate=20170101&todate=20180101&page_size=366&page_offset=0&output_format=series',
+					//url: baseUrl + '/meteodata?meteostation='+meteostationid+'&output_epsg=4326&fromdate=20170101&todate=20180101&page_size=366&page_offset=0',
+					headers: {"token": MIJN_TOKEN },
+					error: function(xhr, textStatus){
+						alert(textStatus +': ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+					},
+					success: doMeteoSeries
+				});
+			}
+		}
+	};
+	function zoomToFeature(e) {
+		var bounds = e.target.getBounds();
+		map['ahn'].fitBounds(bounds, {padding: [0.1,0.1]});
+		map['soil'].fitBounds(bounds, {padding: [0.1,0.1]});
+		map['meteo'].fitBounds(bounds, {padding: [0.1,0.1]});
+	};
+	function onEachFeature(aFeature, aLayer) {
+		var options = aLayer.options || aLayer._options;
+		
+		aLayer.on({
+			click: 	  selectFeature
+		});
+		var id, props = "<b>"+ options.title +"</b><br>";
+		for (d in aFeature.properties) {
+			if (d == 'chart') {
+				//map['meteo'].on('tooltipopen', function(ev){
+				if (options.title == 'ndvi') {
+					map['chart_ndvi'] = document.getElementById('chart1');
+					var bounds = map['chart_ndvi'].getBoundingClientRect();
+					
+					renderDateLines('chart1', true
+									//, JSON.parse(JSON.stringify(ev.tooltip["_source"].feature.properties['chart']))
+									, JSON.parse(JSON.stringify(aFeature.properties['chart']))
+									, bounds.width-40,bounds.height-20,"ndvi"
+									, true, ['id', 'fieldid', 'daynr']);
+				}
+				else {
+					map['chart'] = document.getElementById('chart2');
+					var bounds = map['chart'].getBoundingClientRect();
+					
+					renderDateLines('chart2', true
+									//, JSON.parse(JSON.stringify(ev.tooltip["_source"].feature.properties['chart']))
+									, JSON.parse(JSON.stringify(aFeature.properties['chart']))
+									, bounds.width-40,(bounds.height-20)/4,"meteodata"
+									, true, ["mean_sea_level_pressure","meteostationid","global_radiation",'mean_daily_cloud_cover','max_humidity','mean_humidity','min_humidity','max_temperature','mean_temperature','min_temperature']);
+					renderDateLines('chart2', false
+									//, JSON.parse(JSON.stringify(ev.tooltip["_source"].feature.properties['chart']))
+									, JSON.parse(JSON.stringify(aFeature.properties['chart']))
+									, bounds.width-40,(bounds.height-20)/4,"% meteo"
+									, false, ['min_humidity','max_humidity','mean_humidity','','mean_daily_cloud_cover']);
+					renderDateLines('chart2', false
+									//, JSON.parse(JSON.stringify(ev.tooltip["_source"].feature.properties['chart']))
+									, JSON.parse(JSON.stringify(aFeature.properties['chart']))
+									, bounds.width-40,(bounds.height-20)/4,"ºC meteo"
+									, false, ['min_temperature','','mean_temperature','max_temperature']);
+					renderDateLines('chart2', false
+									//, JSON.parse(JSON.stringify(ev.tooltip["_source"].feature.properties['chart']))
+									, JSON.parse(JSON.stringify(aFeature.properties['chart']))
+									, bounds.width-40,(bounds.height-20)/4,"meteodata"
+									, false, ["mean_sea_level_pressure","global_radiation"]);
+				}
+				//});
+			}
+			else
+				props += '<br>' + d + ': ' + aFeature.properties[d];
+		}
+		aFeature.properties.type= options.title;
+		aLayer.bindTooltip(props, { direction:'center', className: 'label' });
+	};
+	function nextFieldsPage() {
+		offset+=1;
+		var url = baseUrl + '/fields?output_epsg=4326&page_size=50&page_offset='+offset+'&year=2017&geometry=POLYGON(('+bbox[0] +"%20"+ bbox[1] +','+ bbox[0] +"%20"+ bbox[3] +','+ bbox[2] +"%20"+ bbox[3] +','+ bbox[2] +"%20"+ bbox[1] +','+ bbox[0] +"%20"+ bbox[1]+'))&epsg=4326';
+		$.ajax({
+			type: "GET",
+			url: url,
+			headers: {"token": MIJN_TOKEN },
+			error: function(xhr, textStatus){
+				busy = false;
+				alert(textStatus +'-init: ' + (xhr.status || "") +' '+ (xhr.statusText || ""));
+			},
+			success: function (response, textStatus) {
+				if (fieldsLayer)
+					fieldsLayer.addData(response);
+				if (fieldLayer) 
+					fieldLayer.bringToFront();
+				if (response.features.length < 50)
+					busy = false;
+				else
+					nextFieldsPage();
+			}
+		});
+	};
+	function onMoveEnd(e) {
+		var bounds = e.target.getBounds();
+		bbox = bounds.toBBoxString().split(',');
+		
+		if (!busy && (!activeBounds || activeBounds != bounds)) {
+			busy = true;
+			offset = -1;
+			if (fieldsLayer) {
+				fieldsLayer.clearLayers();
+				//controlLayers['fields'].removeLayer(fieldsLayer);
+			}
+			if (fieldLayer) {
+				fieldLayer.clearLayers();
+				controlLayers['fields'].removeLayer(fieldLayer);
+			}
+			nextFieldsPage();
+			activeBounds = bounds;
+		}
+	};
+	function valueOr0(value) { // value 0 would otherwise result in false
+		return (value || value == '0' || value == 0);
+	};
+	function geocodeSearch(searchStr) {
+		var center = map['fields'].getCenter();
+		var url = 'http://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates' +
+		  '?SingleLine=' + searchStr +
+		  '&f=json' +
+		  '&location=' + center +
+		  '&distance=2' +
+		  '&outSR=4326' +
+		  '&maxLocations=1';
+		  
+		var xhttp;
+		if (window.XMLHttpRequest) {
+			xhttp = new XMLHttpRequest();
+		} 
+    else {
+			// code for IE6, IE5
+			xhttp = new ActiveXObject("Microsoft.XMLHTTP");
+		}
+		
+		xhttp.onreadystatechange = function() {
+			if (this.readyState == 4 && this.status == 200) {
+				var response = JSON.parse(this.responseText);
+				var searchExt = response.candidates[0].extent;
+				var bounds =[[searchExt.ymin, searchExt.xmin], [searchExt.ymax, searchExt.xmax]];
+				map['fields'].fitBounds(bounds, {padding: [0,0]}).setZoom(startZoom-1);
+			}
+		};
+		xhttp.open("GET",url,true);
+		xhttp.send();
+	};
+	if (document.querySelector('#searchForm'))
+		document.querySelector('#searchForm').addEventListener('submit', function(e) {
+			  geocodeSearch(e.target.children.namedItem('search').value);
+			  e.preventDefault();
+			  return false; // prevent page reload
+		});
+	
+	map['fields']= L.map('map1').setView(startView, startZoom);
+	map['meteo'] = L.map('map2',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	map['soil']  = L.map('map3',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	map['ahn']   = L.map('map4',{attributionControl: false, zoomControl: false}).setView(startView, startZoom+1);
+	var baseLayers = {
+		"Open Street Map": L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
+			attribution: '&copy; <a href="http://osm.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+		}),
+		"Google Hybrid Map": L.tileLayer('http://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}',{
+			maxZoom: 20,
+			attribution:'Imagery &copy; DigitalGlobe, Map data &copy; <a href="https://www.google.com/intl/en/help/terms_maps.html" target="_blank">Google</a>',
+			subdomains:['mt0','mt1','mt2','mt3']
+		})
+	};
+    map['fields'].addLayer(baseLayers["Open Street Map"]);
+	map['fields'].on('moveend', onMoveEnd);
+    map['soil'].addLayer( L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+    map['ahn'].addLayer(  L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+    map['meteo'].addLayer(L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png'));
+
+	var controlLayers = {};
+	controlLayers['fields'] = L.control.layers(baseLayers).addTo(map['fields']);
+	controlLayers['fields'].setPosition('topleft');		
+	controlLayers['soil'] = L.control.layers([]).addTo(map['soil']);
+	controlLayers['soil'].setPosition('topleft');		
+	controlLayers['meteo'] = L.control.layers([]).addTo(map['meteo']);
+	controlLayers['meteo'].setPosition('topleft');		
+
+	fieldsLayer = L.geoJson([], {title: 'fields', style: {color: 'green'}, onEachFeature: onEachFeature}).addTo(map['fields']);
+	controlLayers['fields'].addOverlay(fieldsLayer, 'Fields');
+	
+	onMoveEnd({target: map['fields']});
+	
+function renderDateLines(id, clean, data, _width, _height, heading, skip, keys) {
+	// Set the dimensions of the canvas / graph
+	var margin = {top: 5, right: 120, bottom: 20, left: 35},
+		width = _width - margin.left - margin.right,
+		height = _height - margin.top - margin.bottom;
+
+	// Parse the date / time
+	var parseDate = d3.time.format("%Y-%m-%d").parse;
+	var color = d3.scale.category10();
+
+	// Set the ranges
+	var x = d3.time.scale().range([0, width], 0.5);
+	var y = d3.scale.linear().range([height, 0]);
+
+	// Define the axes
+	var xAxis = d3.svg.axis().scale(x)
+		.orient("bottom")
+		.ticks(d3.time.month)	//;	//d3.time.week, Math.ceil(data.length/10)); //2); //
+		.tickFormat(d3.time.format("%b"));
+	var yAxis = d3.svg.axis().scale(y)
+		.orient("left").ticks(5);
+
+	// Define the line
+	var line = d3.svg.line()
+		.defined(function(d) { return d.value; })
+		.x(function(d) { return x(d.date); })
+		.y(function(d) { return y(d.value); });
+	
+	var svg = d3.select("#"+id).selectAll('svg')
+	if (clean && svg.length > 0)	// remove old
+		svg.remove();
+	// Adds the svg canvas
+	svg = d3.select("#"+id)
+		.append("svg")
+			.attr("width", width + margin.left + margin.right)
+			.attr("height", height + margin.top + margin.bottom)
+		.append("g")
+			.attr("transform", 
+				  "translate(" + margin.left + "," + margin.top + ")");
+
+	if (data.length > 0) {
+		if (!skip)	// use supplied keys (in that order)
+			color.domain(keys);
+		else
+			color.domain(Object.keys(data[0]).filter(function(key) { return key !== "datum" && keys.indexOf(key) == -1; }));
+	}
+	else
+		color.domain([]);
+
+	data.forEach(function(d) {
+		d.date = parseDate(d.datum);
+	});
+
+	var series = color.domain().filter(function(key) { return key !== ""; }).map(function(name) {
+		return {
+			name: name,
+			values: data.map(function(d) {
+				return {date: d.date, value: +d[name]};
+			})
+		};
+	});
+
+	x.domain(d3.extent(data, function(d) { return d.date; }));
+	y.domain([d3.min(series, function(c) { return Math.floor(d3.min(c.values, function(v) { return v.value; })); }),
+			d3.max(series, function(c) { return Math.ceil(d3.max(c.values, function(v) { return v.value; })); })]);
+
+	svg.append("g")
+		.attr("class", "x axis")
+		.attr("transform", "translate(0," + height + ")")
+		.call(xAxis);
+
+	svg.append("g")
+			.attr("class", "y axis")
+			.call(yAxis)
+		.append("text")
+			.attr("class", "heading")
+			.attr("transform", "rotate(-90)")
+			.attr("y", -margin.left)
+			.attr("dy", ".71em")
+			.attr("dx", "-0.71em")
+			.style("text-anchor", "end")
+			.text(heading);
+
+	var serie = svg.selectAll(".serie")
+			.data(series)
+		.enter().append("g")
+			.attr("class", "serie");
+	serie.append("path")
+		.attr("class", "line")
+		.attr("d", function(d) { return line(d.values); })
+		.style("stroke", function(d) { return color(d.name); });
+	serie.append("g").selectAll("circle")
+			.data(function(d){return d.values.filter(function(d) { return d.value; }) })
+			.enter()
+		.append("circle")
+			.attr("r", 2)
+			.attr("cx", function(dd){return x(dd.date)})
+			.attr("cy", function(dd){return y(dd.value)})
+			.attr("fill", "none")
+			.attr("stroke", function(d){return color(this.parentNode.__data__.name)});
+	serie.append("text")
+		.attr("class", "label")
+		.datum(function(d, i) { 
+			return {name: d.name, value: d.values[d.values.length - 1]}; 
+		})
+		.attr("transform", function(d, i) { 
+				return "translate(" + x(d.value.date) + "," + (i*20) + ")";
+			//console.log(d.value.value, i, y(0),(i+1)*15, y(0)-(i+1)*20);
+			//if (!Number.isNaN(d.value.value))
+			//	return "translate(" + x(d.value.date) + "," + y(d.value.value) + ")";
+			//else
+			//	return "translate(" + x(d.value.date) + "," + (y(0)-(i+1)*20) + ")";
+		})
+		.attr("x", 5)
+		.attr("dy", ".35em")
+		.attr("stroke", function(d){return color(this.parentNode.__data__.name)})
+		.text(function(d) { return d.name; });
+
+	// Add the mouse line
+	var mouseG = svg.append("g")
+		.attr("class", "mouse-over-effects");
+	mouseG.append("path")
+		.attr("class", "mouse-line")
+		.style("stroke", "black")
+		.style("stroke-width", "1px")
+		.style("opacity", "0");
+
+	var lines = document.getElementsByClassName('line');
+	var mousePerLine = mouseG.selectAll('.mouse-per-line')
+		.data(series)
+		.enter()
+		.append("g")
+		.attr("class", "mouse-per-line");
+
+	mousePerLine.append("circle")
+		.attr("r", 7)
+		.style("stroke", function (d) { return color(d.name); })
+		.style("fill", "none")
+		.style("stroke-width", "2px")
+		.style("opacity", "0");
+
+	mousePerLine.append("text")
+		.attr("class", "hover-text")
+		.attr("dy", "-1em")
+		.attr("transform", "translate(10,3)");
+
+	// Append a rect to catch mouse movements on canvas
+	mouseG.append('svg:rect') 
+		.attr('width', width) 
+		.attr('height', height)
+		.attr('fill', 'none')
+		.attr('pointer-events', 'all')
+		.on('mouseout', function () { // on mouse out hide line, circles and text
+			d3.select(".mouse-line")
+			  .style("opacity", "0");
+			d3.selectAll(".mouse-per-line circle")
+			  .style("opacity", "0");
+			d3.selectAll(".mouse-per-line text")
+			  .style("opacity", "0");
+		})
+		.on('mouseover', function () { // on mouse in show line, circles and text
+			d3.select(".mouse-line")
+			  .style("opacity", "1");
+			d3.selectAll(".mouse-per-line circle")
+			  .style("opacity", "1");
+			d3.selectAll(".mouse-per-line text")
+			  .style("opacity", "1");
+		})
+		.on('mousemove', function () { // mouse moving over canvas
+			var mouse = d3.mouse(this);
+
+			d3.selectAll(".mouse-per-line")
+				.attr("transform", function (d, i) {
+
+					var xDate = x.invert(mouse[0]),
+						bisect = d3.bisector(function (d) { return d.date; }).left;
+						idx = bisect(d.values, xDate);
+						if (idx > d.values.length-1)
+							idx = d.values.length-1;
+
+					d3.select(this).select('text')
+						.text(y.invert(y(d.values[idx].value)).toFixed(2));
+
+					d3.select(".mouse-line")
+						.attr("d", function () {
+							var data = "M" + x(d.values[idx].date) + "," + height;
+							data += " " + x(d.values[idx].date) + "," + 0;
+							return data;
+						});
+					return "translate(" + x(d.values[idx].date) + "," + y(!Number.isNaN(d.values[idx].value)?d.values[idx].value:0) + ")";
+				});
+		});
+};
+</script>
+</body>
+</html>
