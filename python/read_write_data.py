@@ -27,8 +27,8 @@ def read_write(input_path,output_path):
                 risico_code = data[i][64]
                 bdgem = data[i][39]
                 por_40 = data[i][36]
-                url = "http://agrodatacube.wur.nl/api/v1/rest/fields?output_epsg=28992&page_offset=0&year=2017&geometry=POINT({} {})&epsg=28992".format(x,y)
-                #"http://agrodatacube.wur.nl/api/v1/rest/fields?output_epsg=28992&page_size=25&page_offset=0&year=2017&geometry=POINT(127212.5 495887.5)&epsg=28992"
+                url = "https://agrodatacube.wur.nl/api/v2/rest/fields?output_epsg=28992&page_offset=0&year=2017&geometry=POINT({} {})&epsg=28992".format(x,y)
+                #"https://agrodatacube.wur.nl/api/v2/rest/fields?output_epsg=28992&page_size=25&page_offset=0&year=2017&geometry=POINT(127212.5 495887.5)&epsg=28992"
                 response = requests.get(url)
                 fields = geojson.loads(response.content)#This feature collection contains
                 for i in range(len(fields['features'])): #i is 0 to 5 (every year)
@@ -36,7 +36,7 @@ def read_write(input_path,output_path):
                     print(year)
                     fieldid = fields['features'][i]['properties']['fieldid'] #Now, with the fieldId we have to make another call
 
-                    url_ahn = "http://agrodatacube.wur.nl/api/v1/rest/fields/{}/ahn?page_size=25&page_offset=0".format(fieldid)
+                    url_ahn = "https://agrodatacube.wur.nl/api/v2/rest/fields/{}/ahn?page_size=25&page_offset=0".format(fieldid)
                     response_ahn = requests.get(url_ahn)
                     ahn_values = geojson.loads(response_ahn.content)
                     mean = 0
@@ -59,7 +59,7 @@ def read_write(input_path,output_path):
                     ahn_min = min_/len(ahn_values['features'])
                     ahn_max = max_/len(ahn_values['features'])
 
-                    url_crop = "http://agrodatacube.wur.nl/api/v1/rest/fields/{}?output_epsg=28992&page_offset=0".format(fieldid)
+                    url_crop = "https://agrodatacube.wur.nl/api/v2/rest/fields/{}?output_epsg=28992&page_offset=0".format(fieldid)
                     response_crop = requests.get(url_crop, headers={"token":"<your token>"})
                     crop_values = geojson.loads(response_crop.content)
 
@@ -85,7 +85,7 @@ def read_write(input_path,output_path):
                     station5_id = meteo_values['features'][4]['properties']['meteostationid']
                     dist_station5 = meteo_values['features'][4]['properties']['distance']
 
-                    url_ndvi = "http://agrodatacube.wur.nl/api/v1/rest/fields/{}/ndvi?output_epsg=28992&page_offset=0".format(fieldid)
+                    url_ndvi = "https://agrodatacube.wur.nl/api/v2/rest/fields/{}/ndvi?output_epsg=28992&page_offset=0".format(fieldid)
                     response_ndvi = requests.get(url_ndvi,headers={"token":"<your token>"})
                     ndvi_values = geojson.loads(response_ndvi.content)
                     for i in range(len(ndvi_values['features'])):
@@ -100,7 +100,7 @@ def read_write(input_path,output_path):
 ###ZIP coodes
 ###The API only returns 50 max, so I have do nit in QGIS.
 def zip_codes():
-    url_zipcodes = 'http://agrodatacube.wur.nl/api/v1/rest/regions/postalcodes?&output_epsg=28992&page_offset=0'
+    url_zipcodes = 'https://agrodatacube.wur.nl/api/v2/rest/regions/postalcodes?&output_epsg=28992&page_offset=0'
     response_zipcodes = requests.get(url_zipcodes,headers={"token":"<your token>"})
     zip_codes_api = geojson.loads(response_zipcodes.content)
     zip_codes = []
