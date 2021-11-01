@@ -80,7 +80,7 @@
 	var fieldid, meteostationid, activeFeature, map= {}, activeBounds, bbox, offset = 0, busy = false, filecontrol;
 	var fieldsLayer, fieldLayer, fieldAHNLayer, fieldNDVILayer, fieldMeteoLayer, fieldSoiltypesLayer, fieldSoilparamsLayer,
 		AHNLayer, meteoLayer, soiltypesLayer, soilparamsLayer;
-	var baseUrl = 'https://agrodatacube.wur.nl/api/v1/rest';
+	var baseUrl = 'https://agrodatacube.wur.nl/api/v2/rest';
 	var startView = [52.38766,6.257711], startZoom = 15;
 	function mousePropagationKiller(div, map){
 		if (!L.Browser.touch) {
