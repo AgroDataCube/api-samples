@@ -10,7 +10,7 @@ if __name__ == "__main__":
     #
     # Create webserviceD
     #
-    httpUrl = "http://AgrodataCube.wur.nl/api/v1/rest/fields/8/ndvi"
+    httpUrl = "https://AgrodataCube.wur.nl/api/v2/rest/fields/8/ndvi"
     httpResponse = requests.get(httpUrl, headers={"token":"<your token>"})
     print httpResponse.text;
     
